@@ -1,11 +1,9 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-
 from accounts.models import User
 from vehicles.models import Vehicle
 from .models import Trip
-
 
 
 class TripSerializer(serializers.ModelSerializer):
@@ -36,7 +34,8 @@ class TripSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Trip
-        fields = [ 
+
+        fields = [
             "id",
             "driver",
             "driver_username",
@@ -49,22 +48,23 @@ class TripSerializer(serializers.ModelSerializer):
             "start_km",
             "end_km",
             "started_at",
+            "ended_at",
             "traveled_km",
             "created_at",
             "updated_at",
         ]
-        
+
         read_only_fields = [
-                      "id",
-                      "status",
-                      "start_km",
-                      "end_km",
-                      "started_at",
-                      "ended_at",
-                      "created_at",
-                      "updated_at",
-    ]
-        
+            "id",
+            "status",
+            "start_km",
+            "end_km",
+            "started_at",
+            "ended_at",
+            "created_at",
+            "updated_at",
+        ]
+
     def validate(self, attrs):
         allowed_fields = {
             "driver",
@@ -107,3 +107,86 @@ class TripSerializer(serializers.ModelSerializer):
         trip.save()
 
         return trip
+
+
+class TripStartSerializer(serializers.Serializer):
+    start_km = serializers.IntegerField(
+        min_value=0,
+        required=True,
+    )
+
+    start_odometer_photo = serializers.ImageField(
+        required=True,
+        allow_empty_file=False,
+    )
+
+    def validate_start_odometer_photo(self, value):
+        if value.size > 10 * 1024 * 1024:
+            raise serializers.ValidationError(
+                "A foto deve ter no máximo 10 MB."
+            )
+
+        if value.image.format not in {"JPEG", "PNG"}:
+            raise serializers.ValidationError(
+                "Envie uma imagem JPEG ou PNG."
+            )
+
+        return value
+
+    def validate(self, attrs):
+        allowed_fields = {
+            "start_km",
+            "start_odometer_photo",
+        }
+
+        unexpected_fields = set(self.initial_data) - allowed_fields
+
+        if unexpected_fields:
+            raise serializers.ValidationError(
+                {
+                    field: "Este campo não pode ser enviado no início da viagem."
+                    for field in sorted(unexpected_fields)
+                }
+            )
+
+        return attrs
+class TripFinishSerializer(serializers.Serializer):
+    end_km = serializers.IntegerField(
+        min_value=0,
+        required=True,
+    )
+    end_odometer_photo = serializers.ImageField(
+        required=True,
+        allow_empty_file=False,
+    )
+    
+def validate_end_odometer_photo(self, value):
+        if value.size > 10 * 1024 * 1024:
+            raise serializers.ValidationError(
+                "A foto deve ter no máximo 10 MB."
+            )
+
+        if value.image.format not in {"JPEG", "PNG"}:
+            raise serializers.ValidationError(
+                "Envie uma imagem JPEG ou PNG."
+            )
+
+        return value
+
+def validate(self, attrs):
+        allowed_fields = {
+            "end_km",
+            "end_odometer_photo",
+        }
+
+        unexpected_fields = set(self.initial_data) - allowed_fields
+
+        if unexpected_fields:
+            raise serializers.ValidationError(
+                {
+                    field: "Este campo não pode ser enviado na finalização."
+                    for field in sorted(unexpected_fields)
+                }
+            )
+
+        return attrs

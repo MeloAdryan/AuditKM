@@ -21,7 +21,6 @@ class Trip(models.Model):
             "role": "DRIVER",
             "is_active": True,
         },
-        
     )
 
     vehicle = models.ForeignKey(
@@ -29,19 +28,16 @@ class Trip(models.Model):
         on_delete=models.PROTECT,
         related_name="trips",
         verbose_name="Veículo",
-       
     )
 
     origin = models.CharField(
         "Origem",
         max_length=255,
-       
     )
 
     destination = models.CharField(
         "Destino",
         max_length=255,
-        
     )
 
     status = models.CharField(
@@ -95,19 +91,30 @@ class Trip(models.Model):
     created_at = models.DateTimeField(
         "Criada em",
         auto_now_add=True,
-        
     )
 
     updated_at = models.DateTimeField(
         "Atualizada em",
         auto_now=True,
-        
     )
 
     class Meta:
         ordering = ["-created_at"]
         verbose_name = "Viagem"
         verbose_name_plural = "Viagens"
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["driver"],
+                condition=models.Q(status="IN_PROGRESS"),
+                name="one_active_trip_per_driver",
+            ),
+            models.UniqueConstraint(
+                fields=["vehicle"],
+                condition=models.Q(status="IN_PROGRESS"),
+                name="one_active_trip_per_vehicle",
+            ),
+        ]
 
     def clean(self):
         super().clean()

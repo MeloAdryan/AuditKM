@@ -1,9 +1,15 @@
+from io import BytesIO
+
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import SimpleTestCase
 from django.urls import reverse
+from PIL import Image
 from rest_framework.test import APITestCase
 
 from accounts.models import User
 from vehicles.models import Vehicle
 from .models import Trip
+from .serializers import TripStartSerializer
 
 
 class TripAPITests(APITestCase):
@@ -166,3 +172,101 @@ class TripAPITests(APITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("driver", response.data)
+        
+class TripStartSerializerTests(SimpleTestCase):
+    def make_photo(self):
+        buffer = BytesIO()
+
+        Image.new(
+            "RGB",
+            (32, 32),
+            color="white",
+        ).save(buffer, format="JPEG")
+
+        return SimpleUploadedFile(
+            "hodometro.jpg",
+            buffer.getvalue(),
+            content_type="image/jpeg",
+        )
+
+    def test_valid_start_data_is_accepted(self):
+        serializer = TripStartSerializer(
+            data={
+                "start_km": 15000,
+                "start_odometer_photo": self.make_photo(),
+            }
+        )
+
+        self.assertTrue(
+            serializer.is_valid(),
+            serializer.errors,
+        )
+
+        self.assertEqual(
+            serializer.validated_data["start_km"],
+            15000,
+        )
+
+    def test_photo_is_required(self):
+        serializer = TripStartSerializer(
+            data={"start_km": 15000}
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn(
+            "start_odometer_photo",
+            serializer.errors,
+        )
+
+    def test_odometer_is_required(self):
+        serializer = TripStartSerializer(
+            data={
+                "start_odometer_photo": self.make_photo(),
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("start_km", serializer.errors)
+
+    def test_negative_odometer_is_rejected(self):
+        serializer = TripStartSerializer(
+            data={
+                "start_km": -1,
+                "start_odometer_photo": self.make_photo(),
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("start_km", serializer.errors)
+
+    def test_invalid_image_is_rejected(self):
+        fake_photo = SimpleUploadedFile(
+            "hodometro.jpg",
+            b"arquivo que nao e uma imagem",
+            content_type="image/jpeg",
+        )
+
+        serializer = TripStartSerializer(
+            data={
+                "start_km": 15000,
+                "start_odometer_photo": fake_photo,
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn(
+            "start_odometer_photo",
+            serializer.errors,
+        )
+
+    def test_client_cannot_choose_start_time(self):
+        serializer = TripStartSerializer(
+            data={
+                "start_km": 15000,
+                "start_odometer_photo": self.make_photo(),
+                "started_at": "2026-11-02T10:00:00Z",
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("started_at", serializer.errors)

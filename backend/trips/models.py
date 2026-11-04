@@ -1,5 +1,8 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from vehicles.models import Vehicle
@@ -176,3 +179,78 @@ class Trip(models.Model):
 
     def __str__(self):
         return f"Viagem {self.pk} - {self.origin} → {self.destination}"
+
+
+class TripLocation(models.Model):
+    trip = models.ForeignKey(
+        Trip,
+        on_delete=models.PROTECT,
+        related_name="locations",
+        verbose_name="Viagem",
+    )
+
+    point_id = models.UUIDField(
+        "Identificador do ponto no dispositivo",
+    )
+
+    latitude = models.DecimalField(
+        "Latitude",
+        max_digits=10,
+        decimal_places=7,
+        validators=[
+            MinValueValidator(Decimal("-90")),
+            MaxValueValidator(Decimal("90")),
+        ],
+    )
+
+    longitude = models.DecimalField(
+        "Longitude",
+        max_digits=10,
+        decimal_places=7,
+        validators=[
+            MinValueValidator(Decimal("-180")),
+            MaxValueValidator(Decimal("180")),
+        ],
+    )
+
+    accuracy_m = models.DecimalField(
+        "Precisão em metros",
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[
+            MinValueValidator(Decimal("0")),
+        ],
+    )
+
+    recorded_at = models.DateTimeField(
+        "Capturado pelo dispositivo em",
+    )
+
+    received_at = models.DateTimeField(
+        "Recebido pelo servidor em",
+        auto_now_add=True,
+    )
+
+    class Meta:
+        ordering = ["recorded_at", "id"]
+        verbose_name = "Ponto GPS"
+        verbose_name_plural = "Pontos GPS"
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["trip", "point_id"],
+                name="unique_gps_point_per_trip",
+            ),
+        ]
+
+        indexes = [
+            models.Index(
+                fields=["trip", "recorded_at", "id"],
+                name="trip_gps_time_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Viagem {self.trip_id} - {self.recorded_at}"

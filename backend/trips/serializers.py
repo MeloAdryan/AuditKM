@@ -155,12 +155,13 @@ class TripFinishSerializer(serializers.Serializer):
         min_value=0,
         required=True,
     )
+
     end_odometer_photo = serializers.ImageField(
         required=True,
         allow_empty_file=False,
     )
-    
-def validate_end_odometer_photo(self, value):
+
+    def validate_end_odometer_photo(self, value):
         if value.size > 10 * 1024 * 1024:
             raise serializers.ValidationError(
                 "A foto deve ter no máximo 10 MB."
@@ -173,7 +174,7 @@ def validate_end_odometer_photo(self, value):
 
         return value
 
-def validate(self, attrs):
+    def validate(self, attrs):
         allowed_fields = {
             "end_km",
             "end_odometer_photo",

@@ -3,6 +3,8 @@ from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
+from django.http import FileResponse
+from rest_framework.exceptions import NotFound
 
 from accounts.models import User
 from .models import Trip
@@ -116,3 +118,41 @@ class TripViewSet(
             self.get_serializer(trip).data,
             status=status.HTTP_200_OK,
         )
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path=r"odometer-photo/(?P<stage>start|end)",
+        url_name="odometer-photo",
+    )
+    def odometer_photo(self, request, pk=None, stage=None):
+        trip = self.get_object()
+
+        if stage == "start":
+            photo = trip.start_odometer_photo
+        elif stage == "end":
+            photo = trip.end_odometer_photo
+        else:
+            raise NotFound("Tipo de foto inválido.")
+
+        if not photo or not photo.name:
+            raise NotFound("Esta viagem não possui a foto solicitada.")
+
+        try:
+            photo_file = photo.storage.open(photo.name, "rb")
+        except FileNotFoundError as error:
+            raise NotFound(
+                "O arquivo da foto não foi encontrado."
+            ) from error
+
+        response = FileResponse(
+            photo_file,
+            as_attachment=False,
+            filename=photo.name.rsplit("/", 1)[-1],
+        )
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+
+        return response
+    
+    

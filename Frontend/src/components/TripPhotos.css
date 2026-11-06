@@ -1,0 +1,64 @@
+.trip-photos {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid #e0e7ef;
+}
+
+.trip-photos-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.trip-photos-heading h5 {
+  margin: 0;
+  font-size: 15px;
+  color: #102c4c;
+}
+
+.trip-photos-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.odometer-photo {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid #d7e1ed;
+  border-radius: 14px;
+  background: #f6f8fb;
+}
+
+.odometer-photo figcaption {
+  padding: 12px;
+  color: #102c4c;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.odometer-photo img {
+  display: block;
+  width: 100%;
+  height: 220px;
+  object-fit: contain;
+  background: #eaf0f6;
+}
+
+.photo-message {
+  margin: 0;
+  padding: 16px 12px;
+  color: #526580;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+@media (max-width: 600px) {
+  .trip-photos-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,71 @@
+.trip-map-section {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid #e0e7ef;
+}
+
+.trip-map-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.trip-map-heading h5 {
+  margin: 0;
+  color: #102c4c;
+  font-size: 15px;
+}
+
+.trip-map-canvas {
+  width: 100%;
+  height: 340px;
+  overflow: hidden;
+  border: 1px solid #d7e1ed;
+  border-radius: 14px;
+  isolation: isolate;
+}
+
+.trip-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 16px 0;
+  color: #526580;
+  font-size: 13px;
+}
+
+.trip-map-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.map-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.map-dot-start {
+  background: #078b83;
+}
+
+.map-dot-last {
+  background: #102c4c;
+}
+
+.trip-map-note {
+  color: #526580;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+@media (max-width: 600px) {
+  .trip-map-canvas {
+    height: 280px;
+  }
+}

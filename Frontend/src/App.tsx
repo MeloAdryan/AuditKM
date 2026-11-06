@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import "./App.css";
+import TripsPanel from "./components/TripsPanel";
 
 type Tokens = {
   access: string;
@@ -270,7 +271,7 @@ export default function App() {
   };
 
   return (
-    <main className="auth-page">
+    <main className={session ? "auth-page auth-page--workspace" : "auth-page"}>
       <svg
         className="route-decoration"
         viewBox="0 0 1000 260"
@@ -326,6 +327,8 @@ export default function App() {
               </div>
             </dl>
 
+            <TripsPanel accessToken={session.tokens.access} />
+
             <button
               className="primary-button"
               type="button"
@@ -334,6 +337,7 @@ export default function App() {
             >
               {busy ? "Saindo…" : "Sair"}
             </button>
+            
           </div>
         ) : (
           <>

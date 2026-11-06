@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { sendGPSBatch } from "../services/gpsApi";
+import type { GPSPoint } from "../services/gpsApi";
 
 type LocationCaptureProps = {
   tripId: number;
@@ -10,172 +12,187 @@ export default function LocationCapture({
   accessToken,
 }: LocationCaptureProps) {
   const [running, setRunning] = useState(false);
-  const [savedCount, setSavedCount] = useState(0);
+  const [sending, setSending] = useState(false);
+  const [pending, setPending] = useState(0);
+  const [confirmed, setConfirmed] = useState(0);
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
+  const queueRef = useRef<GPSPoint[]>([]);
   const watchRef = useRef<number | null>(null);
-  const controllerRef = useRef<AbortController | null>(null);
-  const generationRef = useRef(0);
+  const busyRef = useRef(false);
+  const activeRef = useRef(false);
+  const automaticRef = useRef(false);
+  const lastCapturedRef = useRef(0);
 
-  useEffect(() => {
-    return () => {
-      generationRef.current += 1;
+  const flushQueue = useCallback(async () => {
+    if (busyRef.current || queueRef.current.length === 0) return;
+
+    const batch = queueRef.current.slice(0, 100);
+
+    busyRef.current = true;
+    setSending(true);
+    setError("");
+
+    try {
+      const result = await sendGPSBatch(tripId, accessToken, batch);
+
+      if (!activeRef.current) return;
+
+      const confirmedIds = new Set(batch.map((point) => point.point_id));
+
+      queueRef.current = queueRef.current.filter(
+        (point) => !confirmedIds.has(point.point_id),
+      );
+
+      setPending(queueRef.current.length);
+      setConfirmed((value) => value + result.received);
+      setMessage(
+        `Lote confirmado: ${result.created} novos e ${result.existing} já existentes.`,
+      );
+    } catch (caught: unknown) {
+      if (!activeRef.current) return;
+
+      automaticRef.current = false;
 
       if (watchRef.current !== null) {
         navigator.geolocation.clearWatch(watchRef.current);
         watchRef.current = null;
       }
 
-      controllerRef.current?.abort();
-    };
+      setRunning(false);
+      setMessage("");
+      setError(
+        `${
+          caught instanceof Error
+            ? caught.message
+            : "Não foi possível confirmar o lote."
+        } A coleta foi parada. Os pontos continuam pendentes nesta página.`,
+      );
+    } finally {
+      busyRef.current = false;
+
+      if (activeRef.current) {
+        setSending(false);
+      }
+    }
   }, [tripId, accessToken]);
 
+  useEffect(() => {
+    activeRef.current = true;
+
+    const timer = window.setInterval(() => {
+      if (automaticRef.current) {
+        void flushQueue();
+      }
+    }, 15000);
+
+    function warnBeforeLeaving(event: BeforeUnloadEvent) {
+      if (queueRef.current.length === 0) return;
+
+      event.preventDefault();
+      event.returnValue = "";
+    }
+
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+
+    return () => {
+      activeRef.current = false;
+      automaticRef.current = false;
+      window.clearInterval(timer);
+      window.removeEventListener("beforeunload", warnBeforeLeaving);
+
+      if (watchRef.current !== null) {
+        navigator.geolocation.clearWatch(watchRef.current);
+        watchRef.current = null;
+      }
+    };
+  }, [flushQueue]);
+
   function stopCollection() {
-    generationRef.current += 1;
+    automaticRef.current = false;
 
     if (watchRef.current !== null) {
       navigator.geolocation.clearWatch(watchRef.current);
       watchRef.current = null;
     }
 
-    const hadPendingRequest = controllerRef.current !== null;
-
-    controllerRef.current?.abort();
-    controllerRef.current = null;
-
     setRunning(false);
     setMessage(
-      hadPendingRequest
-        ? "Coleta parada. Havia um envio em andamento; atualize o percurso para conferir o último registro."
-        : "Coleta parada. Os pontos confirmados continuam salvos.",
+      "Coleta parada. Envie os pontos pendentes antes de sair desta viagem.",
     );
   }
 
   function startCollection() {
-    if (watchRef.current !== null) return;
+    if (watchRef.current !== null || busyRef.current) return;
 
     setError("");
-    setMessage("");
 
     if (!window.isSecureContext || !navigator.geolocation) {
       setError(
-        "A localização exige um navegador compatível e acesso por HTTPS ou localhost.",
+        "A localização exige HTTPS ou localhost e um navegador compatível.",
       );
       return;
     }
 
-    const generation = generationRef.current + 1;
-    generationRef.current = generation;
+    if (queueRef.current.length >= 1000) {
+      setError(
+        "A fila atingiu 1.000 pontos. Envie os pendentes antes de continuar.",
+      );
+      return;
+    }
 
-    let sending = false;
-    let lastSentAt = 0;
-
-    setSavedCount(0);
-    setAccuracy(null);
+    lastCapturedRef.current = 0;
+    automaticRef.current = true;
     setRunning(true);
-    setMessage("Aguardando localização e permissão do navegador…");
-
-    function stopWithError(description: string) {
-      if (generationRef.current !== generation) return;
-
-      generationRef.current += 1;
-
-      if (watchRef.current !== null) {
-        navigator.geolocation.clearWatch(watchRef.current);
-        watchRef.current = null;
-      }
-
-      controllerRef.current?.abort();
-      controllerRef.current = null;
-
-      setRunning(false);
-      setMessage("");
-      setError(description);
-    }
-
-    async function sendPosition(position: GeolocationPosition) {
-      if (generationRef.current !== generation) return;
-
-      setAccuracy(Math.round(position.coords.accuracy));
-
-      if (sending || Date.now() - lastSentAt < 10000) return;
-
-      sending = true;
-
-      const controller = new AbortController();
-      controllerRef.current = controller;
-
-      const timer = window.setTimeout(() => controller.abort(), 15000);
-
-      try {
-        const response = await fetch(`/api/trips/${tripId}/locations/`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          signal: controller.signal,
-          body: JSON.stringify({
-            point_id: crypto.randomUUID(),
-            latitude: Number(position.coords.latitude.toFixed(7)),
-            longitude: Number(position.coords.longitude.toFixed(7)),
-            accuracy_m: Number(position.coords.accuracy.toFixed(2)),
-            recorded_at: new Date(position.timestamp).toISOString(),
-          }),
-        });
-
-        if (!response.ok) {
-          const detail = await response.text();
-
-          throw new Error(
-            response.status === 401
-              ? "Sessão expirada. Entre novamente antes de retomar a coleta."
-              : response.status === 403
-                ? "Somente o motorista responsável pode enviar os pontos."
-                : `Envio recusado (${response.status}): ${detail}`,
-          );
-        }
-
-        if (generationRef.current !== generation) return;
-
-        lastSentAt = Date.now();
-
-        setSavedCount((value) => value + 1);
-        setMessage(
-          "Coleta ativa. O último ponto enviado foi confirmado pelo servidor.",
-        );
-      } catch (caught: unknown) {
-        if (generationRef.current !== generation) return;
-
-        stopWithError(
-          caught instanceof Error && caught.name !== "AbortError"
-            ? `Coleta interrompida: ${caught.message}`
-            : "Coleta interrompida por falha ou demora no envio. Atualize o percurso para verificar o último ponto antes de reiniciar.",
-        );
-      } finally {
-        window.clearTimeout(timer);
-        sending = false;
-
-        if (controllerRef.current === controller) {
-          controllerRef.current = null;
-        }
-      }
-    }
+    setMessage("Aguardando localização…");
 
     watchRef.current = navigator.geolocation.watchPosition(
       (position) => {
-        void sendPosition(position);
+        if (!activeRef.current || !automaticRef.current) return;
+
+        setAccuracy(Math.round(position.coords.accuracy));
+
+        if (Date.now() - lastCapturedRef.current < 10000) {
+          return;
+        }
+
+        if (queueRef.current.length >= 1000) {
+          stopCollection();
+          setError(
+            "A fila atingiu 1.000 pontos. Envie os pendentes para continuar.",
+          );
+          return;
+        }
+
+        const point: GPSPoint = {
+          point_id: crypto.randomUUID(),
+          latitude: Number(position.coords.latitude.toFixed(7)),
+          longitude: Number(position.coords.longitude.toFixed(7)),
+          accuracy_m: Number(position.coords.accuracy.toFixed(2)),
+          recorded_at: new Date(position.timestamp).toISOString(),
+        };
+
+        queueRef.current.push(point);
+        lastCapturedRef.current = Date.now();
+
+        setPending(queueRef.current.length);
+        setMessage(
+          "Coleta ativa. Os pontos aguardam confirmação do envio em lote.",
+        );
       },
       (locationError) => {
-        stopWithError(
+        if (!activeRef.current || !automaticRef.current) return;
+
+        stopCollection();
+
+        setError(
           locationError.code === 1
-            ? "Permissão de localização negada. Autorize nas configurações do navegador."
+            ? "Permissão de localização negada."
             : locationError.code === 2
-              ? "Localização indisponível. Confira as configurações do dispositivo e tente novamente."
-              : "O navegador demorou para obter a localização. Tente iniciar novamente.",
+              ? "O dispositivo não conseguiu determinar a localização."
+              : "O navegador demorou para obter uma posição. Tente iniciar novamente.",
         );
       },
       {
@@ -194,28 +211,41 @@ export default function LocationCapture({
         <button
           className="trip-button"
           type="button"
+          disabled={!running && sending}
           onClick={running ? stopCollection : startCollection}
         >
           {running ? "Parar coleta" : "Iniciar coleta"}
+        </button>
+
+        <button
+          className="trip-button"
+          type="button"
+          disabled={sending || pending === 0}
+          onClick={() => void flushQueue()}
+        >
+          {sending ? "Enviando…" : "Enviar pendentes"}
         </button>
       </div>
 
       <dl className="trip-information">
         <div>
-          <dt>Estado</dt>
+          <dt>Estado da coleta</dt>
           <dd>{running ? "Ativa" : "Parada"}</dd>
         </div>
 
         <div>
-          <dt>Pontos confirmados nesta sessão de coleta</dt>
-          <dd>{savedCount}</dd>
+          <dt>Pontos pendentes</dt>
+          <dd>{pending}</dd>
         </div>
 
         <div>
-          <dt>Precisão da última posição recebida</dt>
-          <dd>
-            {accuracy === null ? "Aguardando localização" : `${accuracy} m`}
-          </dd>
+          <dt>Pontos confirmados nesta tela</dt>
+          <dd>{confirmed}</dd>
+        </div>
+
+        <div>
+          <dt>Precisão da última posição</dt>
+          <dd>{accuracy === null ? "Aguardando" : `${accuracy} m`}</dd>
         </div>
       </dl>
 
@@ -228,14 +258,15 @@ export default function LocationCapture({
       )}
 
       <p className="trip-map-note">
-        Mantenha esta página aberta e em primeiro plano. Trocar de viagem, sair
-        da conta ou fechar a página encerra a coleta. Parar a coleta não
-        finaliza a viagem.
+        Mantenha a página aberta e em primeiro plano. A coleta aceita uma
+        posição a cada 10 segundos e tenta enviar os pendentes a cada 15
+        segundos.
       </p>
 
       <p className="trip-map-note">
-        Esta versão não possui fila de envio offline. Atualize o percurso para
-        consultar os pontos salvos.
+        A fila existe somente na memória. Antes de trocar de viagem, sair da
+        conta ou fechar a página, pare a coleta e envie todos os pendentes.
+        Ainda não há armazenamento offline persistente.
       </p>
     </section>
   );

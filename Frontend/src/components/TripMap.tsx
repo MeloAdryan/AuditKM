@@ -12,8 +12,8 @@ type LocationPoint = {
 };
 
 type LocationPage = {
-  count: number;
   next: string | null;
+  previous: string | null;
   results: LocationPoint[];
 };
 
@@ -171,42 +171,63 @@ export default function TripMap({
       controller.abort();
     }, 60000);
 
-    async function loadPoints() {
+        async function loadPoints() {
       try {
         const points: LocationPoint[] = [];
-        let page = 1;
+        const receivedIds = new Set<number>();
+        const visitedPages = new Set<string>();
 
-        while (true) {
-          const response = await fetch(
-            `/api/trips/${tripId}/locations/?page=${page}`,
-            {
-              headers: {
-                Accept: "application/json",
-                Authorization: `Bearer ${accessToken}`,
-              },
-              cache: "no-store",
-              signal: controller.signal,
+        const endpoint = `/api/trips/${tripId}/track/`;
+
+        let nextUrl: string | null = endpoint;
+        let pages = 0;
+
+        while (nextUrl !== null) {
+          if (visitedPages.has(nextUrl)) {
+            throw new Error(
+              "O serviço retornou uma sequência de páginas repetida.",
+            );
+          }
+
+          visitedPages.add(nextUrl);
+          pages += 1;
+
+          if (pages > 200) {
+            throw new Error(
+              "O percurso ultrapassa o limite desta visualização. Nenhum trajeto parcial será apresentado.",
+            );
+          }
+
+          const response = await fetch(nextUrl, {
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${accessToken}`,
             },
-          );
+            cache: "no-store",
+            signal: controller.signal,
+          });
 
           if (!response.ok) {
-            const message =
+            throw new Error(
               response.status === 401
                 ? "Sua sessão expirou. Saia e entre novamente."
                 : response.status === 403
                   ? "Sua conta não permite consultar este percurso."
                   : response.status === 404
-                    ? "A viagem ou a página de pontos não está disponível."
-                    : "Não foi possível consultar o percurso.";
-
-            throw new Error(message);
+                    ? "O percurso não está disponível para sua conta."
+                    : "Não foi possível consultar o percurso.",
+            );
           }
 
           const data = (await response.json()) as LocationPage;
 
-          if (!Array.isArray(data.results)) {
+          if (
+            !Array.isArray(data.results) ||
+            (data.next !== null &&
+              typeof data.next !== "string")
+          ) {
             throw new Error(
-              "O serviço retornou uma lista de pontos inválida.",
+              "O serviço retornou uma página de percurso inválida.",
             );
           }
 
@@ -215,6 +236,7 @@ export default function TripMap({
             const longitude = Number(point.longitude);
 
             if (
+              !Number.isInteger(point.id) ||
               !Number.isFinite(latitude) ||
               !Number.isFinite(longitude) ||
               latitude < -90 ||
@@ -223,22 +245,48 @@ export default function TripMap({
               longitude > 180
             ) {
               throw new Error(
-                "O percurso contém uma coordenada inválida.",
+                "O percurso contém um ponto inválido.",
               );
             }
 
+            if (receivedIds.has(point.id)) {
+              throw new Error(
+                "O percurso mudou durante a consulta ou contém registros repetidos. Tente atualizar.",
+              );
+            }
+
+            receivedIds.add(point.id);
             points.push(point);
           }
 
-          if (!data.next) break;
-
-          if (page >= 200) {
-            throw new Error(
-              "Este percurso ultrapassa o limite desta visualização. Precisaremos otimizar a consulta para carregá-lo.",
+          if (data.next === null) {
+            nextUrl = null;
+          } else {
+            const address = new URL(
+              data.next,
+              window.location.origin,
             );
-          }
 
-          page += 1;
+            if (address.pathname !== endpoint) {
+              throw new Error(
+                "O serviço retornou um endereço de percurso inesperado.",
+              );
+            }
+
+            const cursor = address.searchParams.get("cursor");
+
+            if (!cursor) {
+              throw new Error(
+                "O serviço retornou uma continuação sem cursor.",
+              );
+            }
+
+            const parameters = new URLSearchParams({
+              cursor,
+            });
+
+            nextUrl = `${endpoint}?${parameters.toString()}`;
+          }
         }
 
         if (cancelled) return;
@@ -257,7 +305,7 @@ export default function TripMap({
           error: timedOut
             ? "O percurso demorou para carregar. Tente atualizar."
             : caught instanceof TypeError
-              ? "Não foi possível conectar ao serviço."
+              ? "Não foi possível conectar ao serviço ou interpretar a resposta."
               : caught instanceof Error
                 ? caught.message
                 : "Não foi possível carregar o percurso.",
